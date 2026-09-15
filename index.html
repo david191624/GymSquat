@@ -2,285 +2,283 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Squat Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Squat & Hinge Tracker</title>
+    
+    <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- TensorFlow.js and MoveNet Pose Detection -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    
+    <!-- Tone.js for Audio -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #000; /* Black for full screen video */
-            color: white;
+        body, html {
             margin: 0;
-            overflow: hidden; /* Lock scrolling for fullscreen */
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Inter', sans-serif;
         }
-        .glass-panel {
-            background: rgba(15, 23, 42, 0.7);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
-        }
+
         canvas {
             display: block;
             width: 100%;
             height: 100%;
             object-fit: cover; /* Make canvas act as a fullscreen background */
         }
-        /* Hide the video element as we draw it onto the canvas */
+        
+        /* Hide the video element robustly for all mobile browsers */
         video {
-            display: none;
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            z-index: -10;
+            pointer-events: none;
         }
         
+        .glass-panel {
+            background: rgba(31, 41, 55, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
         .metric-value {
             font-variant-numeric: tabular-nums;
             text-shadow: 0 2px 4px rgba(0,0,0,0.7);
         }
-        
-        /* Custom styling for the range slider */
+
+        /* Custom Range Slider */
         input[type=range] {
-            accent-color: #3b82f6;
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            margin-top: -6px;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #4b5563;
+            border-radius: 2px;
         }
     </style>
 </head>
-<body class="h-screen w-screen relative">
+<body class="text-white">
 
     <div id="canvas-container" class="absolute inset-0 w-full h-full z-0">
-        <video id="video" playsinline></video>
+        <!-- Added playsinline muted autoplay to prevent mobile native controls -->
+        <video id="video" playsinline muted autoplay></video>
         <canvas id="output-canvas"></canvas>
-        
-        <!-- Overlay HUD for loading -->
-        <div id="loading-overlay" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-md z-50">
-            <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-            <p id="loading-text" class="text-xl font-semibold text-blue-200">Loading AI Model...</p>
-        </div>
     </div>
 
-    <!-- Left Panel: Title & Settings -->
-    <div class="absolute top-4 left-4 sm:top-6 sm:left-6 z-20 flex flex-col gap-3 sm:gap-4 pointer-events-none w-48 sm:w-64">
-        <!-- Title -->
-        <div class="hidden sm:block">
-            <h1 class="text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400 drop-shadow-lg">
-                AI Squat Tracker
-            </h1>
-            <p class="text-slate-100 mt-1 font-medium drop-shadow-md text-sm">Full body in frame. Side view is best.</p>
-        </div>
+    <!-- Left Side: Controls & Settings -->
+    <div class="absolute top-4 left-4 z-10 flex flex-col gap-4 w-56 sm:w-64 pointer-events-auto">
         
-        <!-- Controls (Pointer events enabled so user can interact) -->
-        <div class="pointer-events-auto flex flex-col gap-3 mt-1 sm:mt-0">
-            
-            <!-- Exercise Toggle -->
-            <div class="glass-panel p-2 sm:p-3 rounded-xl shadow-lg">
-                <label class="text-[10px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 block">Exercise Type</label>
-                <div class="flex bg-slate-800/80 rounded-lg p-1 border border-slate-700/50 flex-wrap gap-1">
-                    <button id="btn-squat" class="flex-1 py-1.5 px-1 text-[10px] sm:text-xs rounded-md bg-blue-600 text-white font-semibold shadow-sm transition-all duration-200 text-center">Squat</button>
-                    <button id="btn-bss" class="flex-1 py-1.5 px-1 text-[10px] sm:text-xs rounded-md bg-transparent text-slate-400 hover:text-white font-semibold transition-all duration-200 text-center">Bulgarian</button>
-                    <button id="btn-hip-hinge" class="flex-1 py-1.5 px-1 text-[10px] sm:text-xs rounded-md bg-transparent text-slate-400 hover:text-white font-semibold transition-all duration-200 text-center">Hinge</button>
-                </div>
+        <!-- Exercise Type Selector -->
+        <div class="glass-panel p-4 rounded-2xl shadow-lg">
+            <h3 class="text-xs font-bold text-gray-400 mb-3 tracking-wider uppercase">Exercise Type</h3>
+            <div class="flex flex-col gap-2">
+                <button id="btn-squat" class="ex-btn w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold transition-colors">Squat</button>
+                <button id="btn-bulgarian" class="ex-btn w-full py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm font-semibold transition-colors">Bulgarian</button>
+                <button id="btn-hinge" class="ex-btn w-full py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm font-semibold transition-colors">Hinge</button>
             </div>
+        </div>
 
-            <!-- Hold Time Slider -->
-            <div class="glass-panel p-2 sm:p-3 rounded-xl shadow-lg">
-                <div class="flex justify-between items-center mb-2">
-                    <label class="text-[10px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider">Target Hold</label>
-                    <span id="target-hold-display" class="text-xs sm:text-sm font-bold text-blue-400">2.0s</span>
-                </div>
-                <input type="range" id="target-hold-slider" min="0" max="10" step="0.5" value="2" class="w-full h-1.5 sm:h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer">
+        <!-- Target Hold Time Settings -->
+        <div class="glass-panel p-4 rounded-2xl shadow-lg">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xs font-bold text-gray-400 tracking-wider uppercase">Target Hold</h3>
+                <span id="hold-display" class="text-blue-400 font-bold text-sm">2.0s</span>
             </div>
-
+            <input type="range" id="hold-slider" min="0" max="5" step="0.5" value="2">
         </div>
     </div>
 
-    <div class="absolute bottom-6 sm:bottom-8 left-1/2 -translate-x-1/2 z-30 flex gap-3 sm:gap-4">
-        <button id="start-btn" class="px-6 py-3 sm:px-8 sm:py-4 bg-blue-600/90 backdrop-blur-md hover:bg-blue-500 text-white rounded-full font-bold shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-base sm:text-lg border border-blue-400/30 whitespace-nowrap">
-            Start Camera
-        </button>
-        <button id="stop-btn" class="px-6 py-3 sm:px-8 sm:py-4 bg-red-600/90 backdrop-blur-md hover:bg-red-500 text-white rounded-full font-bold shadow-[0_0_20px_rgba(220,38,38,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed hidden text-base sm:text-lg border border-red-400/30 whitespace-nowrap" disabled>
-            Stop Camera
-        </button>
-    </div>
-
-    <div class="absolute top-4 right-4 sm:top-6 sm:right-6 w-32 sm:w-72 flex flex-col gap-2 sm:gap-3 z-20 pointer-events-none">
+    <!-- Right Side: Real-time Data HUD -->
+    <div class="absolute top-4 right-4 z-10 flex flex-col gap-3 w-32 sm:w-40 pointer-events-none">
         
-        <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl">
-            <h3 class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Current State</h3>
-            <div id="state-display" class="text-xl sm:text-3xl font-bold text-blue-400 metric-value">STANDING</div>
+        <!-- Current State -->
+        <div class="glass-panel p-3 sm:p-4 rounded-2xl shadow-lg">
+            <div class="text-[10px] sm:text-xs text-gray-400 font-bold tracking-wider mb-1">STATE</div>
+            <div id="current-state" class="text-lg sm:text-xl font-black text-blue-400 tracking-tight">STANDING</div>
         </div>
 
-        <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl">
-            <h3 id="angle-title" class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Knee Angle</h3>
+        <!-- Joint Angle -->
+        <div class="glass-panel p-3 sm:p-4 rounded-2xl shadow-lg">
+            <div id="angle-label" class="text-[10px] sm:text-xs text-gray-400 font-bold tracking-wider mb-1 uppercase">KNEE ANGLE</div>
             <div class="flex items-baseline gap-1">
-                <div id="angle-display" class="text-2xl sm:text-4xl font-bold metric-value">180</div>
-                <span class="text-sm sm:text-lg text-slate-400">°</span>
+                <div id="angle-value" class="text-3xl sm:text-4xl font-black metric-value">--</div>
+                <div class="text-sm text-gray-400">°</div>
             </div>
-            <!-- Angle visualizer bar -->
-            <div class="w-full bg-slate-700/50 h-1.5 sm:h-2 rounded-full mt-2 sm:mt-3 overflow-hidden">
-                <div id="angle-bar" class="bg-blue-500 h-full transition-all duration-100" style="width: 100%"></div>
+            <div class="w-full bg-gray-700 h-1.5 rounded-full mt-2 overflow-hidden">
+                <div id="angle-bar" class="bg-blue-500 h-full w-full transition-all duration-100"></div>
             </div>
-            <div class="flex justify-between text-[8px] sm:text-[10px] text-slate-400 mt-1 font-medium">
-                <span>90° (Down)</span>
-                <span>160° (Up)</span>
+            <div class="flex justify-between text-[8px] sm:text-[10px] text-gray-500 mt-1 font-medium">
+                <span id="angle-min">90° (Down)</span>
+                <span id="angle-max">160° (Up)</span>
             </div>
         </div>
 
-        <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl">
-            <h3 class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Torso Angle</h3>
+        <!-- Torso Angle -->
+        <div class="glass-panel p-3 sm:p-4 rounded-2xl shadow-lg">
+            <div class="text-[10px] sm:text-xs text-gray-400 font-bold tracking-wider mb-1 uppercase">TORSO ANGLE</div>
             <div class="flex items-baseline gap-1">
-                <div id="torso-angle-display" class="text-2xl sm:text-4xl font-bold metric-value">0</div>
-                <span class="text-sm sm:text-lg text-slate-400">°</span>
+                <div id="torso-value" class="text-2xl sm:text-3xl font-black metric-value">--</div>
+                <div class="text-sm text-gray-400">°</div>
             </div>
-            <div class="flex justify-between text-[8px] sm:text-[10px] text-slate-400 mt-1 font-medium">
+            <div class="flex justify-between text-[8px] sm:text-[10px] text-gray-500 mt-1 font-medium">
                 <span>0° (Upright)</span>
                 <span>90° (Parallel)</span>
             </div>
         </div>
 
-        <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl">
-            <h3 class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Hold Time</h3>
+        <!-- Hold Time -->
+        <div class="glass-panel p-3 sm:p-4 rounded-2xl shadow-lg">
+            <div class="text-[10px] sm:text-xs text-gray-400 font-bold tracking-wider mb-1">HOLD TIME</div>
             <div class="flex items-baseline gap-1">
-                <div id="time-display" class="text-2xl sm:text-4xl font-bold metric-value text-white">0.0</div>
-                <span class="text-sm sm:text-lg text-slate-400">sec</span>
+                <div id="hold-value" class="text-2xl sm:text-3xl font-black metric-value text-white transition-colors duration-200">0.0</div>
+                <div class="text-xs text-gray-400">sec</div>
             </div>
         </div>
 
-        <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-emerald-500/50 border shadow-lg shadow-emerald-500/10">
-            <h3 class="text-[9px] sm:text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1"><span id="rep-title">Squat</span> Reps</h3>
-            <div id="rep-display" class="text-4xl sm:text-5xl font-extrabold text-white metric-value">0</div>
+        <!-- Rep Counter -->
+        <div class="glass-panel p-3 sm:p-4 rounded-2xl shadow-lg border-t-2 border-t-emerald-500">
+            <div id="rep-title" class="text-[10px] sm:text-xs text-emerald-400 font-bold tracking-wider mb-1 uppercase">SQUAT REPS</div>
+            <div id="rep-value" class="text-4xl sm:text-5xl font-black metric-value text-white">0</div>
+        </div>
+    </div>
+
+    <!-- Start Overlay -->
+    <div id="start-overlay" class="absolute inset-0 bg-black/90 z-50 flex flex-col items-center justify-center backdrop-blur-sm transition-opacity duration-500">
+        <div class="text-center max-w-md px-6">
+            <h1 class="text-4xl font-black text-white mb-4 tracking-tight">AI Form Tracker</h1>
+            <p class="text-gray-400 mb-8 text-sm">Place your device on the floor leaning against a wall. Ensure your full body is in the frame side-on.</p>
+            <button id="start-btn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-12 rounded-full shadow-lg shadow-blue-500/30 transition-all transform hover:scale-105 active:scale-95 text-lg">
+                Enable Camera & Start
+            </button>
         </div>
     </div>
 
     <script>
+        // DOM Elements
         const video = document.getElementById('video');
         const canvas = document.getElementById('output-canvas');
         const ctx = canvas.getContext('2d');
+        const startOverlay = document.getElementById('start-overlay');
+        const startBtn = document.getElementById('start-btn');
         
-        const ui = {
-            loading: document.getElementById('loading-overlay'),
-            loadingText: document.getElementById('loading-text'),
-            startBtn: document.getElementById('start-btn'),
-            stopBtn: document.getElementById('stop-btn'),
-            stateDisplay: document.getElementById('state-display'),
-            angleDisplay: document.getElementById('angle-display'),
-            angleBar: document.getElementById('angle-bar'),
-            timeDisplay: document.getElementById('time-display'),
-            repDisplay: document.getElementById('rep-display'),
-            btnSquat: document.getElementById('btn-squat'),
-            btnBss: document.getElementById('btn-bss'),
-            btnHipHinge: document.getElementById('btn-hip-hinge'),
-            holdSlider: document.getElementById('target-hold-slider'),
-            holdDisplay: document.getElementById('target-hold-display'),
-            angleTitle: document.getElementById('angle-title'),
-            repTitle: document.getElementById('rep-title'),
-            torsoAngleDisplay: document.getElementById('torso-angle-display')
-        };
+        const stateEl = document.getElementById('current-state');
+        const angleValueEl = document.getElementById('angle-value');
+        const angleBarEl = document.getElementById('angle-bar');
+        const angleLabelEl = document.getElementById('angle-label');
+        const torsoValueEl = document.getElementById('torso-value');
+        const holdValueEl = document.getElementById('hold-value');
+        const repValueEl = document.getElementById('rep-value');
+        const repTitleEl = document.getElementById('rep-title');
+        const holdDisplayEl = document.getElementById('hold-display');
+        const holdSlider = document.getElementById('hold-slider');
 
+        // Logic Variables
         let detector;
-        let animationId;
-        let isDetecting = false;
-        let beepSynth; // Audio Synthesizer
-
-        // Squat logic state
-        let currentState = 'UNKNOWN'; // 'UP', 'DOWN', 'UNKNOWN'
+        let isRunning = false;
         let repCount = 0;
+        let currentState = "UP"; // UP, GOING_DOWN, DOWN, GOING_UP
+        
         let holdStartTime = 0;
         let currentHoldTime = 0;
-        let currentAngle = 180;
         let targetHoldTime = 2.0;
         let hasPlayedHoldSound = false;
-        let currentExercise = 'squat'; // Tracks active exercise mode
-        
-        // Thresholds
-        const ANGLE_UP = 150; 
-        let ANGLE_DOWN = 90; // Default for squat, changes for BSS and Hinge
-        const MIN_CONFIDENCE = 0.3; 
 
-        // Shared button styling classes
-        const btnClassesActive = "flex-1 py-1.5 px-1 text-[10px] sm:text-xs rounded-md bg-blue-600 text-white font-semibold shadow-sm transition-all duration-200 text-center";
-        const btnClassesInactive = "flex-1 py-1.5 px-1 text-[10px] sm:text-xs rounded-md bg-transparent text-slate-400 hover:text-white font-semibold transition-all duration-200 text-center";
+        // Exercise Settings
+        let currentExercise = "SQUAT"; // SQUAT, BULGARIAN, HINGE
+        let ANGLE_DOWN = 90;
+        let ANGLE_UP = 150;
 
-        // Handle exercise switching
+        // Audio Synth
+        let synth;
+
+        function initAudio() {
+            // Initialize Tone.js Synth on user interaction
+            synth = new Tone.Synth({
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 1 }
+            }).toDestination();
+        }
+
+        // UI Listeners
+        startBtn.addEventListener('click', async () => {
+            initAudio();
+            startBtn.innerText = "Loading AI Model...";
+            startBtn.disabled = true;
+            await initApp();
+            startOverlay.classList.add('opacity-0');
+            setTimeout(() => startOverlay.style.display = 'none', 500);
+        });
+
+        holdSlider.addEventListener('input', (e) => {
+            targetHoldTime = parseFloat(e.target.value);
+            holdDisplayEl.innerText = targetHoldTime.toFixed(1) + "s";
+        });
+
+        const exBtns = {
+            'SQUAT': document.getElementById('btn-squat'),
+            'BULGARIAN': document.getElementById('btn-bulgarian'),
+            'HINGE': document.getElementById('btn-hinge')
+        };
+
         function setExercise(type) {
             currentExercise = type;
             
-            ui.btnSquat.className = type === 'squat' ? btnClassesActive : btnClassesInactive;
-            ui.btnBss.className = type === 'bss' ? btnClassesActive : btnClassesInactive;
-            ui.btnHipHinge.className = type === 'hip_hinge' ? btnClassesActive : btnClassesInactive;
+            // Reset styles
+            Object.values(exBtns).forEach(btn => {
+                btn.classList.remove('bg-blue-600', 'text-white');
+                btn.classList.add('bg-gray-700', 'text-gray-300');
+            });
+            
+            // Set active style
+            exBtns[type].classList.add('bg-blue-600', 'text-white');
+            exBtns[type].classList.remove('bg-gray-700', 'text-gray-300');
 
-            if (type === 'squat') {
+            // Update Logic Thresholds & UI Labels
+            if (type === "SQUAT") {
                 ANGLE_DOWN = 90;
-                ui.angleTitle.innerText = 'KNEE ANGLE';
-                ui.repTitle.innerText = 'SQUAT';
-            } else if (type === 'bss') {
-                ANGLE_DOWN = 100;
-                ui.angleTitle.innerText = 'KNEE ANGLE';
-                ui.repTitle.innerText = 'BULGARIAN';
-            } else if (type === 'hip_hinge') {
-                ANGLE_DOWN = 110; // Bent over threshold for the hip joint
-                ui.angleTitle.innerText = 'HIP ANGLE';
-                ui.repTitle.innerText = 'HIP HINGE';
+                angleLabelEl.innerText = "KNEE ANGLE";
+                repTitleEl.innerText = "SQUAT REPS";
+                document.getElementById('angle-min').innerText = "90° (Down)";
+            } else if (type === "BULGARIAN") {
+                ANGLE_DOWN = 100; // Slightly higher tolerance for split squats
+                angleLabelEl.innerText = "KNEE ANGLE";
+                repTitleEl.innerText = "BULGARIAN REPS";
+                document.getElementById('angle-min').innerText = "100° (Down)";
+            } else if (type === "HINGE") {
+                ANGLE_DOWN = 100; // Tracking Hip Angle instead of Knee
+                angleLabelEl.innerText = "HIP ANGLE";
+                repTitleEl.innerText = "HINGE REPS";
+                document.getElementById('angle-min').innerText = "100° (Down)";
             }
         }
 
-        // Settings Listeners
-        ui.btnSquat.addEventListener('click', () => setExercise('squat'));
-        ui.btnBss.addEventListener('click', () => setExercise('bss'));
-        ui.btnHipHinge.addEventListener('click', () => setExercise('hip_hinge'));
-
-        ui.holdSlider.addEventListener('input', (e) => {
-            targetHoldTime = parseFloat(e.target.value);
-            ui.holdDisplay.innerText = targetHoldTime.toFixed(1) + 's';
-        });
-
-        async function initAudio() {
-            // Initialize Tone.js synthesized sound on first user interaction
-            if (!beepSynth) {
-                await Tone.start();
-                beepSynth = new Tone.Synth({
-                    oscillator: { type: "triangle" },
-                    envelope: { attack: 0.05, decay: 0.2, sustain: 0.2, release: 1.5 }
-                }).toDestination();
-            }
-        }
-
-        async function initModel() {
-            try {
-                ui.loadingText.innerText = "Initializing TensorFlow.js...";
-                await tf.ready();
-                
-                ui.loadingText.innerText = "Loading MoveNet Model...";
-                const detectorConfig = { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING };
-                detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
-                
-                ui.loading.style.display = 'none';
-                console.log("Model loaded successfully.");
-            } catch (error) {
-                console.error("Error loading model:", error);
-                ui.loadingText.innerText = "Error loading model. Check console.";
-                ui.loadingText.className = "text-lg font-semibold text-red-500";
-            }
-        }
-
-        // Calculate angle between three points (A, B, C) where B is the vertex (Knee)
-        function calculateAngle(a, b, c) {
-            const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-            let angle = Math.abs(radians * 180.0 / Math.PI);
-            if (angle > 180.0) {
-                angle = 360.0 - angle;
-            }
-            return angle;
-        }
-
-        // Calculate absolute angle of the torso relative to a true vertical line
-        function calculateTorsoAngle(shoulder, hip) {
-            const dx = Math.abs(shoulder.x - hip.x);
-            const dy = Math.abs(shoulder.y - hip.y);
-            return Math.atan2(dx, dy) * (180.0 / Math.PI);
-        }
+        exBtns['SQUAT'].addEventListener('click', () => setExercise('SQUAT'));
+        exBtns['BULGARIAN'].addEventListener('click', () => setExercise('BULGARIAN'));
+        exBtns['HINGE'].addEventListener('click', () => setExercise('HINGE'));
 
         async function setupCamera() {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -288,14 +286,15 @@
             }
             
             // Adjust camera ideal resolution based on device width to support mobile portrait modes gracefully
-            const isMobile = window.innerWidth < 640;
+            const isMobile = window.innerWidth < 640 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
             
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: false,
                 video: {
                     facingMode: 'user',
-                    width: isMobile ? { ideal: 480 } : { ideal: 1280 },
-                    height: isMobile ? { ideal: 640 } : { ideal: 720 }
+                    // Request portrait dimensions (height > width) for mobile, landscape for desktop
+                    width: isMobile ? { ideal: 720 } : { ideal: 1280 },
+                    height: isMobile ? { ideal: 1280 } : { ideal: 720 }
                 }
             });
             video.srcObject = stream;
@@ -303,278 +302,207 @@
             return new Promise((resolve) => {
                 video.onloadedmetadata = () => {
                     video.play();
-                    // Match canvas size to video size initially
+                    // Set internal canvas resolution to match raw video feed
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
-                    
-                    // Handle device rotation / window resize
-                    window.addEventListener('resize', () => {
-                        if (video.readyState >= 2) { 
-                            canvas.width = video.videoWidth;
-                            canvas.height = video.videoHeight;
-                        }
-                    });
-                    
                     resolve(video);
                 };
             });
         }
 
-        function stopCamera() {
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach(track => track.stop());
-                video.srcObject = null;
-            }
-            isDetecting = false;
-            cancelAnimationFrame(animationId);
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        async function loadModel() {
+            const detectorConfig = { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING };
+            detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
         }
 
-        function processSquatLogic(angle) {
-            currentAngle = angle;
+        // Math Helpers
+        function calculateAngle(a, b, c) {
+            const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+            let angle = Math.abs(radians * 180.0 / Math.PI);
+            if (angle > 180.0) angle = 360 - angle;
+            return Math.round(angle);
+        }
+
+        function calculateTorsoAngle(shoulder, hip) {
+            // Angle from true vertical (Y axis). 
+            // 0 = standing perfectly upright, 90 = leaning forward parallel to floor
+            const dx = Math.abs(shoulder.x - hip.x);
+            const dy = Math.abs(shoulder.y - hip.y);
+            let angle = Math.atan2(dx, dy) * (180.0 / Math.PI);
+            return Math.round(angle);
+        }
+
+        async function detectPose() {
+            if (!isRunning) return;
+
+            const poses = await detector.estimatePoses(video);
             
-            // Update UI Angle
-            ui.angleDisplay.innerText = angle.toFixed(1);
-            // Map angle 60-180 to 0-100% for the bar
-            let barPercentage = ((angle - 60) / (180 - 60)) * 100;
-            barPercentage = Math.max(0, Math.min(100, barPercentage));
-            ui.angleBar.style.width = `${barPercentage}%`;
+            // Draw video to canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // State Machine
-            if (angle > ANGLE_UP) {
-                if (currentState === 'DOWN') {
-                    // Completed a rep
-                    repCount++;
-                    ui.repDisplay.innerText = repCount;
-                    
-                    // Flash screen green on successful rep
-                    ui.repDisplay.parentElement.classList.add('bg-emerald-900');
-                    setTimeout(() => {
-                        ui.repDisplay.parentElement.classList.remove('bg-emerald-900');
-                    }, 300);
-                }
-                currentState = 'UP';
-                ui.stateDisplay.innerText = 'STANDING';
-                ui.stateDisplay.className = 'text-xl sm:text-3xl font-bold text-blue-400 metric-value';
-                ui.angleBar.className = 'h-full transition-all duration-100 bg-blue-500';
-                
-                // Reset hold time & sound
-                holdStartTime = 0;
-                currentHoldTime = 0;
-                hasPlayedHoldSound = false;
-                ui.timeDisplay.classList.remove('text-emerald-400');
-                ui.timeDisplay.classList.add('text-white');
-                
-            } else if (angle < ANGLE_DOWN) {
-                if (currentState === 'UP' || currentState === 'UNKNOWN') {
-                    // Just transitioned to down
-                    holdStartTime = performance.now();
-                }
-                currentState = 'DOWN';
-                ui.stateDisplay.innerText = 'SQUATTING';
-                ui.stateDisplay.className = 'text-xl sm:text-3xl font-bold text-orange-400 metric-value';
-                ui.angleBar.className = 'h-full transition-all duration-100 bg-orange-500';
-                
-                // Calculate hold time
-                if (holdStartTime > 0) {
-                    currentHoldTime = (performance.now() - holdStartTime) / 1000; // in seconds
-                    
-                    // Trigger sound if target reached
-                    if (targetHoldTime > 0 && currentHoldTime >= targetHoldTime && !hasPlayedHoldSound) {
-                        if (beepSynth) {
-                            // Play a pleasant "success" chime (C5 note)
-                            beepSynth.triggerAttackRelease("C5", "8n");
-                        }
-                        hasPlayedHoldSound = true;
-                        ui.timeDisplay.classList.add('text-emerald-400');
-                        ui.timeDisplay.classList.remove('text-white');
-                    }
-                }
-            } else {
-                // In transition (between 90 and 150)
-                if(currentState === 'UP' || currentState === 'DOWN') {
-                     ui.stateDisplay.innerText = 'TRANSITION';
-                     ui.stateDisplay.className = 'text-xl sm:text-3xl font-bold text-yellow-400 metric-value';
-                }
+            if (poses.length > 0) {
+                const keypoints = poses[0].keypoints;
+                drawSkeleton(keypoints);
+                analyzeForm(keypoints);
             }
 
-            // Update UI Hold Time
-            ui.timeDisplay.innerText = currentHoldTime.toFixed(1);
+            requestAnimationFrame(detectPose);
         }
 
-        function drawKeypoint(keypoint, color = 'white') {
-            if (keypoint.score > MIN_CONFIDENCE) {
-                ctx.beginPath();
-                ctx.arc(keypoint.x, keypoint.y, 6, 0, 2 * Math.PI);
-                ctx.fillStyle = color;
-                ctx.fill();
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = 'black';
-                ctx.stroke();
+        function analyzeForm(keypoints) {
+            // Map keypoints
+            const points = {};
+            keypoints.forEach(kp => { points[kp.name] = kp; });
+
+            // Determine which side is more visible
+            const leftVisibility = (points.left_hip.score + points.left_knee.score + points.left_ankle.score) / 3;
+            const rightVisibility = (points.right_hip.score + points.right_knee.score + points.right_ankle.score) / 3;
+            
+            const isLeft = leftVisibility > rightVisibility;
+            const prefix = isLeft ? 'left_' : 'right_';
+
+            const shoulder = points[`${prefix}shoulder`];
+            const hip = points[`${prefix}hip`];
+            const knee = points[`${prefix}knee`];
+            const ankle = points[`${prefix}ankle`];
+
+            // Ensure we have high enough confidence to calculate
+            if (shoulder.score > 0.3 && hip.score > 0.4 && knee.score > 0.4 && ankle.score > 0.4) {
+                
+                // Calculate Angles
+                const kneeAngle = calculateAngle(hip, knee, ankle);
+                const hipAngle = calculateAngle(shoulder, hip, knee);
+                const torsoAngle = calculateTorsoAngle(shoulder, hip);
+                
+                // Update Torso UI
+                torsoValueEl.innerText = torsoAngle;
+
+                // Determine active angle based on exercise type
+                let activeAngle = (currentExercise === "HINGE") ? hipAngle : kneeAngle;
+
+                // Update Angle UI
+                angleValueEl.innerText = activeAngle;
+                
+                // Visual Bar logic (map angle between Down and Up thresholds)
+                let barPct = ((activeAngle - ANGLE_DOWN) / (ANGLE_UP - ANGLE_DOWN)) * 100;
+                barPct = Math.max(0, Math.min(100, barPct));
+                angleBarEl.style.width = `${barPct}%`;
+                
+                if (activeAngle <= ANGLE_DOWN) {
+                    angleBarEl.classList.remove('bg-blue-500');
+                    angleBarEl.classList.add('bg-emerald-500');
+                } else {
+                    angleBarEl.classList.add('bg-blue-500');
+                    angleBarEl.classList.remove('bg-emerald-500');
+                }
+
+                // State Machine & Hold Logic
+                if (activeAngle > ANGLE_UP) {
+                    if (currentState === "DOWN" || currentState === "GOING_DOWN") {
+                        repCount++;
+                        repValueEl.innerText = repCount;
+                        
+                        // Small animation on rep complete
+                        repValueEl.classList.add('text-emerald-400', 'scale-110');
+                        setTimeout(() => repValueEl.classList.remove('text-emerald-400', 'scale-110'), 300);
+                    }
+                    currentState = "UP";
+                    stateEl.innerText = "STANDING";
+                    stateEl.className = "text-lg sm:text-xl font-black text-blue-400 tracking-tight";
+                    
+                    // Reset hold timer
+                    holdStartTime = 0;
+                    currentHoldTime = 0;
+                    hasPlayedHoldSound = false;
+                    holdValueEl.innerText = "0.0";
+                    holdValueEl.classList.remove('text-emerald-400');
+                    holdValueEl.classList.add('text-white');
+
+                } else if (activeAngle <= ANGLE_DOWN) {
+                    currentState = "DOWN";
+                    stateEl.innerText = "HOLDING";
+                    stateEl.className = "text-lg sm:text-xl font-black text-emerald-400 tracking-tight";
+                    
+                    // Handle Timer
+                    if (holdStartTime === 0) {
+                        holdStartTime = performance.now();
+                    }
+                    currentHoldTime = (performance.now() - holdStartTime) / 1000;
+                    holdValueEl.innerText = currentHoldTime.toFixed(1);
+
+                    // Check for target completion
+                    if (currentHoldTime >= targetHoldTime) {
+                        holdValueEl.classList.remove('text-white');
+                        holdValueEl.classList.add('text-emerald-400');
+                        
+                        if (!hasPlayedHoldSound && synth) {
+                            // Play Chime!
+                            synth.triggerAttackRelease("C5", "8n");
+                            hasPlayedHoldSound = true;
+                        }
+                    }
+
+                } else {
+                    currentState = "GOING_DOWN";
+                    stateEl.innerText = "IN MOTION";
+                    stateEl.className = "text-lg sm:text-xl font-black text-amber-400 tracking-tight";
+                    
+                    holdStartTime = 0;
+                    hasPlayedHoldSound = false;
+                }
             }
         }
 
         function drawSkeleton(keypoints) {
-            // Define connections for the lower body (and torso for context)
-            const connections = [
-                ['left_shoulder', 'left_hip'],
-                ['right_shoulder', 'right_hip'],
-                ['left_hip', 'right_hip'],
-                ['left_shoulder', 'right_shoulder'],
-                ['left_hip', 'left_knee'],
-                ['right_hip', 'right_knee'],
-                ['left_knee', 'left_ankle'],
-                ['right_knee', 'right_ankle']
-            ];
-
+            ctx.fillStyle = '#10b981'; // emerald-500
+            ctx.strokeStyle = '#3b82f6'; // blue-500
             ctx.lineWidth = 4;
-            
-            connections.forEach(([p1Name, p2Name]) => {
-                const p1 = keypoints.find(k => k.name === p1Name);
-                const p2 = keypoints.find(k => k.name === p2Name);
 
-                if (p1 && p2 && p1.score > MIN_CONFIDENCE && p2.score > MIN_CONFIDENCE) {
+            // Draw connecting lines
+            const adjacentKeyPoints = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
+            adjacentKeyPoints.forEach(([i, j]) => {
+                const kp1 = keypoints[i];
+                const kp2 = keypoints[j];
+
+                if (kp1.score > 0.3 && kp2.score > 0.3) {
                     ctx.beginPath();
-                    ctx.moveTo(p1.x, p1.y);
-                    ctx.lineTo(p2.x, p2.y);
-                    
-                    // Color based on state
-                    if (currentState === 'DOWN') {
-                        ctx.strokeStyle = '#f97316'; // orange-500
-                    } else if (currentState === 'UP') {
-                        ctx.strokeStyle = '#3b82f6'; // blue-500
-                    } else {
-                        ctx.strokeStyle = '#fbbf24'; // yellow-400
-                    }
-                    
+                    ctx.moveTo(kp1.x, kp1.y);
+                    ctx.lineTo(kp2.x, kp2.y);
                     ctx.stroke();
                 }
             });
 
-            // Draw points on top of lines
-            keypoints.forEach(k => {
-                // Highlight leg joints
-                if (['left_hip', 'right_hip', 'left_knee', 'right_knee', 'left_ankle', 'right_ankle'].includes(k.name)) {
-                     drawKeypoint(k, '#10b981'); // emerald
-                } else {
-                     drawKeypoint(k, '#e2e8f0'); // slate
+            // Draw points
+            keypoints.forEach(kp => {
+                if (kp.score > 0.3) {
+                    ctx.beginPath();
+                    ctx.arc(kp.x, kp.y, 6, 0, 2 * Math.PI);
+                    ctx.fill();
+                    ctx.stroke();
                 }
             });
         }
 
-        async function detectPose() {
-            if (!isDetecting) return;
-
-            // Draw video frame to canvas
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            // Detect poses
+        async function initApp() {
             try {
-                const poses = await detector.estimatePoses(video, {
-                    maxPoses: 1,
-                    flipHorizontal: false // Set to true if you want mirrored view
+                await setupCamera();
+                await loadModel();
+                
+                // Adjust canvas size when window resizes
+                window.addEventListener('resize', () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
                 });
 
-                if (poses.length > 0) {
-                    const keypoints = poses[0].keypoints;
-                    
-                    // Draw skeletal overlay
-                    drawSkeleton(keypoints);
-
-                    // Determine which side is more visible (left or right) to calculate angle
-                    const leftShoulder = keypoints.find(k => k.name === 'left_shoulder');
-                    const leftHip = keypoints.find(k => k.name === 'left_hip');
-                    const leftKnee = keypoints.find(k => k.name === 'left_knee');
-                    const leftAnkle = keypoints.find(k => k.name === 'left_ankle');
-
-                    const rightShoulder = keypoints.find(k => k.name === 'right_shoulder');
-                    const rightHip = keypoints.find(k => k.name === 'right_hip');
-                    const rightKnee = keypoints.find(k => k.name === 'right_knee');
-                    const rightAnkle = keypoints.find(k => k.name === 'right_ankle');
-
-                    // Calculate confidence sums for both sides (including shoulder now for hinge context)
-                    const leftConfidence = (leftHip?.score || 0) + (leftKnee?.score || 0) + (leftAnkle?.score || 0) + (leftShoulder?.score || 0);
-                    const rightConfidence = (rightHip?.score || 0) + (rightKnee?.score || 0) + (rightAnkle?.score || 0) + (rightShoulder?.score || 0);
-
-                    let activeSide = null;
-
-                    if (leftConfidence > rightConfidence && leftConfidence > (MIN_CONFIDENCE * 3)) {
-                        activeSide = { shoulder: leftShoulder, hip: leftHip, knee: leftKnee, ankle: leftAnkle };
-                    } else if (rightConfidence >= leftConfidence && rightConfidence > (MIN_CONFIDENCE * 3)) {
-                        activeSide = { shoulder: rightShoulder, hip: rightHip, knee: rightKnee, ankle: rightAnkle };
-                    }
-
-                    if (activeSide && activeSide.shoulder && activeSide.hip && activeSide.knee && activeSide.ankle) {
-                        
-                        // Calculate both relevant joint angles
-                        const kneeAngle = calculateAngle(activeSide.hip, activeSide.knee, activeSide.ankle);
-                        const hipAngle = calculateAngle(activeSide.shoulder, activeSide.hip, activeSide.knee);
-                        const torsoAngle = calculateTorsoAngle(activeSide.shoulder, activeSide.hip);
-                        
-                        // Choose which angle to route to the state machine based on exercise
-                        const relevantAngle = currentExercise === 'hip_hinge' ? hipAngle : kneeAngle;
-                        
-                        // Update Torso UI Display
-                        ui.torsoAngleDisplay.innerText = torsoAngle.toFixed(1);
-                        
-                        // Choose where to draw the text based on the active joint
-                        const jointForText = currentExercise === 'hip_hinge' ? activeSide.hip : activeSide.knee;
-
-                        processSquatLogic(relevantAngle);
-
-                        // Draw angle text near the active joint on canvas
-                        ctx.fillStyle = 'white';
-                        const dynamicFontSize = Math.max(16, Math.floor(canvas.width / 25));
-                        ctx.font = `${dynamicFontSize}px Inter, sans-serif`;
-                        ctx.strokeStyle = 'black';
-                        ctx.lineWidth = 3;
-                        const text = `${relevantAngle.toFixed(0)}°`;
-                        ctx.strokeText(text, jointForText.x + 15, jointForText.y);
-                        ctx.fillText(text, jointForText.x + 15, jointForText.y);
-                    }
-                }
-            } catch (error) {
-                console.warn("Pose detection warning:", error);
-            }
-
-            // Loop
-            animationId = requestAnimationFrame(detectPose);
-        }
-
-        ui.startBtn.addEventListener('click', async () => {
-            try {
-                ui.startBtn.disabled = true;
-                ui.startBtn.innerText = "Starting...";
-                
-                await initAudio(); // Start Audio Context on user gesture
-                
-                await setupCamera();
-                isDetecting = true;
+                isRunning = true;
                 detectPose();
-                
-                ui.startBtn.classList.add('hidden');
-                ui.stopBtn.disabled = false;
-                ui.stopBtn.classList.remove('hidden');
-            } catch (e) {
-                console.error("Camera access denied or failed.", e);
-                alert("Please grant camera permissions to use the tracker.");
-                ui.startBtn.disabled = false;
-                ui.startBtn.innerText = "Start Camera";
+            } catch (err) {
+                console.error(err);
+                alert("Error starting app. Please ensure camera permissions are granted.");
+                startBtn.innerText = "Error - Check Camera";
             }
-        });
-
-        ui.stopBtn.addEventListener('click', () => {
-            stopCamera();
-            ui.startBtn.classList.remove('hidden');
-            ui.startBtn.disabled = false;
-            ui.startBtn.innerText = "Start Camera";
-            ui.stopBtn.disabled = true;
-            ui.stopBtn.classList.add('hidden');
-        });
-
-        // Initialize on load
-        window.onload = initModel;
-
+        }
     </script>
 </body>
 </html>
