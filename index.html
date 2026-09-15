@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Squat Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000; /* Black for full screen video */
+            color: white;
+            margin: 0;
+            overflow: hidden; /* Lock scrolling for fullscreen */
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* Make canvas act as a fullscreen background */
+        }
+        /* Hide the video element as we draw it onto the canvas */
+        video {
+            display: none;
+        }
+        
+        .metric-value {
+            font-variant-numeric: tabular-nums;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.7);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen relative">
+
+    <div id="canvas-container" class="absolute inset-0 w-full h-full z-0">
+        <video id="video" playsinline></video>
+        <canvas id="output-canvas"></canvas>
+        
+        <!-- Overlay HUD for loading -->
+        <div id="loading-overlay" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-md z-50">
+            <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p id="loading-text" class="text-xl font-semibold text-blue-200">Loading AI Model...</p>
+        </div>
+    </div>
+
+    <div class="absolute top-6 left-6 z-20 pointer-events-none hidden sm:block">
+        <h1 class="text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400 drop-shadow-lg">
+            AI Squat Tracker
+        </h1>
+        <p class="text-slate-100 mt-1 font-medium drop-shadow-md text-sm">Full body in frame. Side view is best.</p>
+    </div>
+
+    <div class="absolute bottom-6 sm:bottom-8 left-1/2 -translate-x-1/2 z-30 flex gap-3 sm:gap-4">
+        <button id="start-btn" class="px-6 py-3 sm:px-8 sm:py-4 bg-blue-600/90 backdrop-blur-md hover:bg-blue-500 text-white rounded-full font-bold shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-base sm:text-lg border border-blue-400/30 whitespace-nowrap">
+            Start Camera
+        </button>
+        <button id="stop-btn" class="px-6 py-3 sm:px-8 sm:py-4 bg-red-600/90 backdrop-blur-md hover:bg-red-500 text-white rounded-full font-bold shadow-[0_0_20px_rgba(220,38,38,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed hidden text-base sm:text-lg border border-red-400/30 whitespace-nowrap" disabled>
+            Stop Camera
+        </button>
+    </div>
+
+    <div class="absolute top-4 right-4 sm:top-6 sm:right-6 w-32 sm:w-72 flex flex-col gap-2 sm:gap-3 z-20 pointer-events-none">
+        
+        <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl">
+            <h3 class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Current State</h3>
+            <div id="state-display" class="text-xl sm:text-3xl font-bold text-blue-400 metric-value">STANDING</div>
+        </div>
+
+        <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl">
+            <h3 class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Knee Angle</h3>
+            <div class="flex items-baseline gap-1">
+                <div id="angle-display" class="text-2xl sm:text-4xl font-bold metric-value">180</div>
+                <span class="text-sm sm:text-lg text-slate-400">°</span>
+            </div>
+            <!-- Angle visualizer bar -->
+            <div class="w-full bg-slate-700/50 h-1.5 sm:h-2 rounded-full mt-2 sm:mt-3 overflow-hidden">
+                <div id="angle-bar" class="bg-blue-500 h-full transition-all duration-100" style="width: 100%"></div>
+            </div>
+            <div class="flex justify-between text-[8px] sm:text-[10px] text-slate-400 mt-1 font-medium">
+                <span>90° (Down)</span>
+                <span>160° (Up)</span>
+            </div>
+        </div>
+
+        <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl">
+            <h3 class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Hold Time</h3>
+            <div class="flex items-baseline gap-1">
+                <div id="time-display" class="text-2xl sm:text-4xl font-bold metric-value text-white">0.0</div>
+                <span class="text-sm sm:text-lg text-slate-400">sec</span>
+            </div>
+        </div>
+
+        <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-emerald-500/50 border shadow-lg shadow-emerald-500/10">
+            <h3 class="text-[9px] sm:text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">Rep Count</h3>
+            <div id="rep-display" class="text-4xl sm:text-5xl font-extrabold text-white metric-value">0</div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('output-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const ui = {
+            loading: document.getElementById('loading-overlay'),
+            loadingText: document.getElementById('loading-text'),
+            startBtn: document.getElementById('start-btn'),
+            stopBtn: document.getElementById('stop-btn'),
+            stateDisplay: document.getElementById('state-display'),
+            angleDisplay: document.getElementById('angle-display'),
+            angleBar: document.getElementById('angle-bar'),
+            timeDisplay: document.getElementById('time-display'),
+            repDisplay: document.getElementById('rep-display')
+        };
+
+        let detector;
+        let animationId;
+        let isDetecting = false;
+
+        // Squat logic state
+        let currentState = 'UNKNOWN'; // 'UP', 'DOWN', 'UNKNOWN'
+        let repCount = 0;
+        let holdStartTime = 0;
+        let currentHoldTime = 0;
+        let currentAngle = 180;
+        
+        // Thresholds
+        const ANGLE_UP = 150; // Angle greater than this is considered standing
+        const ANGLE_DOWN = 90; // Angle less than this is considered a full squat
+        const MIN_CONFIDENCE = 0.3; // Minimum confidence score to trust a keypoint
+
+        async function initModel() {
+            try {
+                ui.loadingText.innerText = "Initializing TensorFlow.js...";
+                await tf.ready();
+                
+                ui.loadingText.innerText = "Loading MoveNet Model...";
+                const detectorConfig = { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING };
+                detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
+                
+                ui.loading.style.display = 'none';
+                console.log("Model loaded successfully.");
+            } catch (error) {
+                console.error("Error loading model:", error);
+                ui.loadingText.innerText = "Error loading model. Check console.";
+                ui.loadingText.className = "text-lg font-semibold text-red-500";
+            }
+        }
+
+        // Calculate angle between three points (A, B, C) where B is the vertex (Knee)
+        function calculateAngle(a, b, c) {
+            const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+            let angle = Math.abs(radians * 180.0 / Math.PI);
+            if (angle > 180.0) {
+                angle = 360.0 - angle;
+            }
+            return angle;
+        }
+
+        async function setupCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error("Browser API navigator.mediaDevices.getUserMedia not available");
+            }
+            
+            // Adjust camera ideal resolution based on device width to support mobile portrait modes gracefully
+            const isMobile = window.innerWidth < 640;
+            
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: {
+                    facingMode: 'user',
+                    width: isMobile ? { ideal: 480 } : { ideal: 1280 },
+                    height: isMobile ? { ideal: 640 } : { ideal: 720 }
+                }
+            });
+            video.srcObject = stream;
+            
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    video.play();
+                    // Match canvas size to video size initially
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    
+                    // Handle device rotation / window resize
+                    window.addEventListener('resize', () => {
+                        if (video.readyState >= 2) { 
+                            canvas.width = video.videoWidth;
+                            canvas.height = video.videoHeight;
+                        }
+                    });
+                    
+                    resolve(video);
+                };
+            });
+        }
+
+        function stopCamera() {
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            isDetecting = false;
+            cancelAnimationFrame(animationId);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function processSquatLogic(angle) {
+            currentAngle = angle;
+            
+            // Update UI Angle
+            ui.angleDisplay.innerText = angle.toFixed(1);
+            // Map angle 60-180 to 0-100% for the bar
+            let barPercentage = ((angle - 60) / (180 - 60)) * 100;
+            barPercentage = Math.max(0, Math.min(100, barPercentage));
+            ui.angleBar.style.width = `${barPercentage}%`;
+
+            // State Machine
+            if (angle > ANGLE_UP) {
+                if (currentState === 'DOWN') {
+                    // Completed a rep
+                    repCount++;
+                    ui.repDisplay.innerText = repCount;
+                    
+                    // Flash screen green on successful rep
+                    ui.repDisplay.parentElement.classList.add('bg-emerald-900');
+                    setTimeout(() => {
+                        ui.repDisplay.parentElement.classList.remove('bg-emerald-900');
+                    }, 300);
+                }
+                currentState = 'UP';
+                ui.stateDisplay.innerText = 'STANDING';
+                ui.stateDisplay.className = 'text-xl sm:text-3xl font-bold text-blue-400 metric-value';
+                ui.angleBar.className = 'h-full transition-all duration-100 bg-blue-500';
+                
+                // Reset hold time
+                holdStartTime = 0;
+                currentHoldTime = 0;
+                
+            } else if (angle < ANGLE_DOWN) {
+                if (currentState === 'UP' || currentState === 'UNKNOWN') {
+                    // Just transitioned to down
+                    holdStartTime = performance.now();
+                }
+                currentState = 'DOWN';
+                ui.stateDisplay.innerText = 'SQUATTING';
+                ui.stateDisplay.className = 'text-xl sm:text-3xl font-bold text-orange-400 metric-value';
+                ui.angleBar.className = 'h-full transition-all duration-100 bg-orange-500';
+                
+                // Calculate hold time
+                if (holdStartTime > 0) {
+                    currentHoldTime = (performance.now() - holdStartTime) / 1000; // in seconds
+                }
+            } else {
+                // In transition (between 90 and 150)
+                if(currentState === 'UP' || currentState === 'DOWN') {
+                     ui.stateDisplay.innerText = 'TRANSITION';
+                     ui.stateDisplay.className = 'text-xl sm:text-3xl font-bold text-yellow-400 metric-value';
+                }
+            }
+
+            // Update UI Hold Time
+            ui.timeDisplay.innerText = currentHoldTime.toFixed(1);
+        }
+
+        function drawKeypoint(keypoint, color = 'white') {
+            if (keypoint.score > MIN_CONFIDENCE) {
+                ctx.beginPath();
+                ctx.arc(keypoint.x, keypoint.y, 6, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = 'black';
+                ctx.stroke();
+            }
+        }
+
+        function drawSkeleton(keypoints) {
+            // Define connections for the lower body (and torso for context)
+            const connections = [
+                ['left_shoulder', 'left_hip'],
+                ['right_shoulder', 'right_hip'],
+                ['left_hip', 'right_hip'],
+                ['left_shoulder', 'right_shoulder'],
+                ['left_hip', 'left_knee'],
+                ['right_hip', 'right_knee'],
+                ['left_knee', 'left_ankle'],
+                ['right_knee', 'right_ankle']
+            ];
+
+            ctx.lineWidth = 4;
+            
+            connections.forEach(([p1Name, p2Name]) => {
+                const p1 = keypoints.find(k => k.name === p1Name);
+                const p2 = keypoints.find(k => k.name === p2Name);
+
+                if (p1 && p2 && p1.score > MIN_CONFIDENCE && p2.score > MIN_CONFIDENCE) {
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                    
+                    // Color based on state
+                    if (currentState === 'DOWN') {
+                        ctx.strokeStyle = '#f97316'; // orange-500
+                    } else if (currentState === 'UP') {
+                        ctx.strokeStyle = '#3b82f6'; // blue-500
+                    } else {
+                        ctx.strokeStyle = '#fbbf24'; // yellow-400
+                    }
+                    
+                    ctx.stroke();
+                }
+            });
+
+            // Draw points on top of lines
+            keypoints.forEach(k => {
+                // Highlight leg joints
+                if (['left_hip', 'right_hip', 'left_knee', 'right_knee', 'left_ankle', 'right_ankle'].includes(k.name)) {
+                     drawKeypoint(k, '#10b981'); // emerald
+                } else {
+                     drawKeypoint(k, '#e2e8f0'); // slate
+                }
+            });
+        }
+
+        async function detectPose() {
+            if (!isDetecting) return;
+
+            // Draw video frame to canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Detect poses
+            try {
+                const poses = await detector.estimatePoses(video, {
+                    maxPoses: 1,
+                    flipHorizontal: false // Set to true if you want mirrored view
+                });
+
+                if (poses.length > 0) {
+                    const keypoints = poses[0].keypoints;
+                    
+                    // Draw skeletal overlay
+                    drawSkeleton(keypoints);
+
+                    // Determine which side is more visible (left or right) to calculate angle
+                    const leftHip = keypoints.find(k => k.name === 'left_hip');
+                    const leftKnee = keypoints.find(k => k.name === 'left_knee');
+                    const leftAnkle = keypoints.find(k => k.name === 'left_ankle');
+
+                    const rightHip = keypoints.find(k => k.name === 'right_hip');
+                    const rightKnee = keypoints.find(k => k.name === 'right_knee');
+                    const rightAnkle = keypoints.find(k => k.name === 'right_ankle');
+
+                    // Calculate confidence sums for both legs
+                    const leftConfidence = (leftHip?.score || 0) + (leftKnee?.score || 0) + (leftAnkle?.score || 0);
+                    const rightConfidence = (rightHip?.score || 0) + (rightKnee?.score || 0) + (rightAnkle?.score || 0);
+
+                    let activeLeg = null;
+
+                    if (leftConfidence > rightConfidence && leftConfidence > (MIN_CONFIDENCE * 3)) {
+                        activeLeg = { hip: leftHip, knee: leftKnee, ankle: leftAnkle };
+                    } else if (rightConfidence >= leftConfidence && rightConfidence > (MIN_CONFIDENCE * 3)) {
+                        activeLeg = { hip: rightHip, knee: rightKnee, ankle: rightAnkle };
+                    }
+
+                    if (activeLeg) {
+                        const angle = calculateAngle(activeLeg.hip, activeLeg.knee, activeLeg.ankle);
+                        processSquatLogic(angle);
+
+                        // Draw angle text near the knee on canvas
+                        ctx.fillStyle = 'white';
+                        const dynamicFontSize = Math.max(16, Math.floor(canvas.width / 25));
+                        ctx.font = `${dynamicFontSize}px Inter, sans-serif`;
+                        ctx.strokeStyle = 'black';
+                        ctx.lineWidth = 3;
+                        const text = `${angle.toFixed(0)}°`;
+                        ctx.strokeText(text, activeLeg.knee.x + 15, activeLeg.knee.y);
+                        ctx.fillText(text, activeLeg.knee.x + 15, activeLeg.knee.y);
+                    }
+                }
+            } catch (error) {
+                console.warn("Pose detection warning:", error);
+            }
+
+            // Loop
+            animationId = requestAnimationFrame(detectPose);
+        }
+
+        ui.startBtn.addEventListener('click', async () => {
+            try {
+                ui.startBtn.disabled = true;
+                ui.startBtn.innerText = "Starting...";
+                await setupCamera();
+                isDetecting = true;
+                detectPose();
+                
+                ui.startBtn.classList.add('hidden');
+                ui.stopBtn.disabled = false;
+                ui.stopBtn.classList.remove('hidden');
+            } catch (e) {
+                console.error("Camera access denied or failed.", e);
+                alert("Please grant camera permissions to use the tracker.");
+                ui.startBtn.disabled = false;
+                ui.startBtn.innerText = "Start Camera";
+            }
+        });
+
+        ui.stopBtn.addEventListener('click', () => {
+            stopCamera();
+            ui.startBtn.classList.remove('hidden');
+            ui.startBtn.disabled = false;
+            ui.startBtn.innerText = "Start Camera";
+            ui.stopBtn.disabled = true;
+            ui.stopBtn.classList.add('hidden');
+        });
+
+        // Initialize on load
+        window.onload = initModel;
+
+    </script>
+</body>
+</html>
