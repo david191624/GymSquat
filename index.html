@@ -77,9 +77,10 @@
             <!-- Exercise Toggle -->
             <div class="glass-panel p-2 sm:p-3 rounded-xl shadow-lg">
                 <label class="text-[10px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 block">Exercise Type</label>
-                <div class="flex bg-slate-800/80 rounded-lg p-1 border border-slate-700/50">
-                    <button id="btn-squat" class="flex-1 py-1.5 text-xs sm:text-sm rounded-md bg-blue-600 text-white font-semibold shadow-sm transition-all duration-200">Squat</button>
-                    <button id="btn-bss" class="flex-1 py-1.5 text-xs sm:text-sm rounded-md bg-transparent text-slate-400 hover:text-white font-semibold transition-all duration-200">Bulgarian</button>
+                <div class="flex bg-slate-800/80 rounded-lg p-1 border border-slate-700/50 flex-wrap gap-1">
+                    <button id="btn-squat" class="flex-1 py-1.5 px-1 text-[10px] sm:text-xs rounded-md bg-blue-600 text-white font-semibold shadow-sm transition-all duration-200 text-center">Squat</button>
+                    <button id="btn-bss" class="flex-1 py-1.5 px-1 text-[10px] sm:text-xs rounded-md bg-transparent text-slate-400 hover:text-white font-semibold transition-all duration-200 text-center">Bulgarian</button>
+                    <button id="btn-hip-hinge" class="flex-1 py-1.5 px-1 text-[10px] sm:text-xs rounded-md bg-transparent text-slate-400 hover:text-white font-semibold transition-all duration-200 text-center">Hinge</button>
                 </div>
             </div>
 
@@ -112,7 +113,7 @@
         </div>
 
         <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl">
-            <h3 class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Knee Angle</h3>
+            <h3 id="angle-title" class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Knee Angle</h3>
             <div class="flex items-baseline gap-1">
                 <div id="angle-display" class="text-2xl sm:text-4xl font-bold metric-value">180</div>
                 <span class="text-sm sm:text-lg text-slate-400">°</span>
@@ -128,6 +129,18 @@
         </div>
 
         <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl">
+            <h3 class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Torso Angle</h3>
+            <div class="flex items-baseline gap-1">
+                <div id="torso-angle-display" class="text-2xl sm:text-4xl font-bold metric-value">0</div>
+                <span class="text-sm sm:text-lg text-slate-400">°</span>
+            </div>
+            <div class="flex justify-between text-[8px] sm:text-[10px] text-slate-400 mt-1 font-medium">
+                <span>0° (Upright)</span>
+                <span>90° (Parallel)</span>
+            </div>
+        </div>
+
+        <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl">
             <h3 class="text-[9px] sm:text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Hold Time</h3>
             <div class="flex items-baseline gap-1">
                 <div id="time-display" class="text-2xl sm:text-4xl font-bold metric-value text-white">0.0</div>
@@ -136,7 +149,7 @@
         </div>
 
         <div class="glass-panel p-2 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-emerald-500/50 border shadow-lg shadow-emerald-500/10">
-            <h3 class="text-[9px] sm:text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">Rep Count</h3>
+            <h3 class="text-[9px] sm:text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1"><span id="rep-title">Squat</span> Reps</h3>
             <div id="rep-display" class="text-4xl sm:text-5xl font-extrabold text-white metric-value">0</div>
         </div>
     </div>
@@ -158,8 +171,12 @@
             repDisplay: document.getElementById('rep-display'),
             btnSquat: document.getElementById('btn-squat'),
             btnBss: document.getElementById('btn-bss'),
+            btnHipHinge: document.getElementById('btn-hip-hinge'),
             holdSlider: document.getElementById('target-hold-slider'),
-            holdDisplay: document.getElementById('target-hold-display')
+            holdDisplay: document.getElementById('target-hold-display'),
+            angleTitle: document.getElementById('angle-title'),
+            repTitle: document.getElementById('rep-title'),
+            torsoAngleDisplay: document.getElementById('torso-angle-display')
         };
 
         let detector;
@@ -175,24 +192,44 @@
         let currentAngle = 180;
         let targetHoldTime = 2.0;
         let hasPlayedHoldSound = false;
+        let currentExercise = 'squat'; // Tracks active exercise mode
         
         // Thresholds
         const ANGLE_UP = 150; 
-        let ANGLE_DOWN = 90; // Default for squat, changes for BSS
+        let ANGLE_DOWN = 90; // Default for squat, changes for BSS and Hinge
         const MIN_CONFIDENCE = 0.3; 
 
-        // Settings Listeners
-        ui.btnSquat.addEventListener('click', () => {
-            ANGLE_DOWN = 90; // Deeper requirement for regular squat
-            ui.btnSquat.className = "flex-1 py-1.5 text-xs sm:text-sm rounded-md bg-blue-600 text-white font-semibold shadow-sm transition-all duration-200";
-            ui.btnBss.className = "flex-1 py-1.5 text-xs sm:text-sm rounded-md bg-transparent text-slate-400 hover:text-white font-semibold transition-all duration-200";
-        });
+        // Shared button styling classes
+        const btnClassesActive = "flex-1 py-1.5 px-1 text-[10px] sm:text-xs rounded-md bg-blue-600 text-white font-semibold shadow-sm transition-all duration-200 text-center";
+        const btnClassesInactive = "flex-1 py-1.5 px-1 text-[10px] sm:text-xs rounded-md bg-transparent text-slate-400 hover:text-white font-semibold transition-all duration-200 text-center";
 
-        ui.btnBss.addEventListener('click', () => {
-            ANGLE_DOWN = 100; // Bulgarian split squats usually don't reach full 90 degrees at the front knee
-            ui.btnBss.className = "flex-1 py-1.5 text-xs sm:text-sm rounded-md bg-blue-600 text-white font-semibold shadow-sm transition-all duration-200";
-            ui.btnSquat.className = "flex-1 py-1.5 text-xs sm:text-sm rounded-md bg-transparent text-slate-400 hover:text-white font-semibold transition-all duration-200";
-        });
+        // Handle exercise switching
+        function setExercise(type) {
+            currentExercise = type;
+            
+            ui.btnSquat.className = type === 'squat' ? btnClassesActive : btnClassesInactive;
+            ui.btnBss.className = type === 'bss' ? btnClassesActive : btnClassesInactive;
+            ui.btnHipHinge.className = type === 'hip_hinge' ? btnClassesActive : btnClassesInactive;
+
+            if (type === 'squat') {
+                ANGLE_DOWN = 90;
+                ui.angleTitle.innerText = 'KNEE ANGLE';
+                ui.repTitle.innerText = 'SQUAT';
+            } else if (type === 'bss') {
+                ANGLE_DOWN = 100;
+                ui.angleTitle.innerText = 'KNEE ANGLE';
+                ui.repTitle.innerText = 'BULGARIAN';
+            } else if (type === 'hip_hinge') {
+                ANGLE_DOWN = 110; // Bent over threshold for the hip joint
+                ui.angleTitle.innerText = 'HIP ANGLE';
+                ui.repTitle.innerText = 'HIP HINGE';
+            }
+        }
+
+        // Settings Listeners
+        ui.btnSquat.addEventListener('click', () => setExercise('squat'));
+        ui.btnBss.addEventListener('click', () => setExercise('bss'));
+        ui.btnHipHinge.addEventListener('click', () => setExercise('hip_hinge'));
 
         ui.holdSlider.addEventListener('input', (e) => {
             targetHoldTime = parseFloat(e.target.value);
@@ -236,6 +273,13 @@
                 angle = 360.0 - angle;
             }
             return angle;
+        }
+
+        // Calculate absolute angle of the torso relative to a true vertical line
+        function calculateTorsoAngle(shoulder, hip) {
+            const dx = Math.abs(shoulder.x - hip.x);
+            const dy = Math.abs(shoulder.y - hip.y);
+            return Math.atan2(dx, dy) * (180.0 / Math.PI);
         }
 
         async function setupCamera() {
@@ -438,39 +482,55 @@
                     drawSkeleton(keypoints);
 
                     // Determine which side is more visible (left or right) to calculate angle
+                    const leftShoulder = keypoints.find(k => k.name === 'left_shoulder');
                     const leftHip = keypoints.find(k => k.name === 'left_hip');
                     const leftKnee = keypoints.find(k => k.name === 'left_knee');
                     const leftAnkle = keypoints.find(k => k.name === 'left_ankle');
 
+                    const rightShoulder = keypoints.find(k => k.name === 'right_shoulder');
                     const rightHip = keypoints.find(k => k.name === 'right_hip');
                     const rightKnee = keypoints.find(k => k.name === 'right_knee');
                     const rightAnkle = keypoints.find(k => k.name === 'right_ankle');
 
-                    // Calculate confidence sums for both legs
-                    const leftConfidence = (leftHip?.score || 0) + (leftKnee?.score || 0) + (leftAnkle?.score || 0);
-                    const rightConfidence = (rightHip?.score || 0) + (rightKnee?.score || 0) + (rightAnkle?.score || 0);
+                    // Calculate confidence sums for both sides (including shoulder now for hinge context)
+                    const leftConfidence = (leftHip?.score || 0) + (leftKnee?.score || 0) + (leftAnkle?.score || 0) + (leftShoulder?.score || 0);
+                    const rightConfidence = (rightHip?.score || 0) + (rightKnee?.score || 0) + (rightAnkle?.score || 0) + (rightShoulder?.score || 0);
 
-                    let activeLeg = null;
+                    let activeSide = null;
 
                     if (leftConfidence > rightConfidence && leftConfidence > (MIN_CONFIDENCE * 3)) {
-                        activeLeg = { hip: leftHip, knee: leftKnee, ankle: leftAnkle };
+                        activeSide = { shoulder: leftShoulder, hip: leftHip, knee: leftKnee, ankle: leftAnkle };
                     } else if (rightConfidence >= leftConfidence && rightConfidence > (MIN_CONFIDENCE * 3)) {
-                        activeLeg = { hip: rightHip, knee: rightKnee, ankle: rightAnkle };
+                        activeSide = { shoulder: rightShoulder, hip: rightHip, knee: rightKnee, ankle: rightAnkle };
                     }
 
-                    if (activeLeg) {
-                        const angle = calculateAngle(activeLeg.hip, activeLeg.knee, activeLeg.ankle);
-                        processSquatLogic(angle);
+                    if (activeSide && activeSide.shoulder && activeSide.hip && activeSide.knee && activeSide.ankle) {
+                        
+                        // Calculate both relevant joint angles
+                        const kneeAngle = calculateAngle(activeSide.hip, activeSide.knee, activeSide.ankle);
+                        const hipAngle = calculateAngle(activeSide.shoulder, activeSide.hip, activeSide.knee);
+                        const torsoAngle = calculateTorsoAngle(activeSide.shoulder, activeSide.hip);
+                        
+                        // Choose which angle to route to the state machine based on exercise
+                        const relevantAngle = currentExercise === 'hip_hinge' ? hipAngle : kneeAngle;
+                        
+                        // Update Torso UI Display
+                        ui.torsoAngleDisplay.innerText = torsoAngle.toFixed(1);
+                        
+                        // Choose where to draw the text based on the active joint
+                        const jointForText = currentExercise === 'hip_hinge' ? activeSide.hip : activeSide.knee;
 
-                        // Draw angle text near the knee on canvas
+                        processSquatLogic(relevantAngle);
+
+                        // Draw angle text near the active joint on canvas
                         ctx.fillStyle = 'white';
                         const dynamicFontSize = Math.max(16, Math.floor(canvas.width / 25));
                         ctx.font = `${dynamicFontSize}px Inter, sans-serif`;
                         ctx.strokeStyle = 'black';
                         ctx.lineWidth = 3;
-                        const text = `${angle.toFixed(0)}°`;
-                        ctx.strokeText(text, activeLeg.knee.x + 15, activeLeg.knee.y);
-                        ctx.fillText(text, activeLeg.knee.x + 15, activeLeg.knee.y);
+                        const text = `${relevantAngle.toFixed(0)}°`;
+                        ctx.strokeText(text, jointForText.x + 15, jointForText.y);
+                        ctx.fillText(text, jointForText.x + 15, jointForText.y);
                     }
                 }
             } catch (error) {
