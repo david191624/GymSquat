@@ -57,6 +57,15 @@
             text-shadow: 0 2px 4px rgba(0,0,0,0.7);
         }
 
+        /* Hide scrollbar for compact view */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
         /* Custom Range Slider */
         input[type=range] {
             -webkit-appearance: none;
@@ -89,80 +98,76 @@
         <canvas id="output-canvas"></canvas>
     </div>
 
-    <!-- Left Side: Controls & Settings -->
-    <div class="absolute top-4 left-4 z-10 flex flex-col gap-4 w-56 sm:w-64 pointer-events-auto">
+    <!-- Right Side: Unified Controls & Data HUD -->
+    <div class="absolute top-2 right-2 bottom-2 z-10 flex flex-col gap-2 w-36 sm:w-44 pointer-events-none overflow-y-auto no-scrollbar pb-2">
         
-        <!-- Exercise Type Selector -->
-        <div class="glass-panel p-4 rounded-2xl shadow-lg">
-            <h3 class="text-xs font-bold text-gray-400 mb-3 tracking-wider uppercase">Exercise Type</h3>
-            <div class="flex flex-col gap-2">
-                <button id="btn-squat" class="ex-btn w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold transition-colors">Squat</button>
-                <button id="btn-bulgarian" class="ex-btn w-full py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm font-semibold transition-colors">Bulgarian</button>
-                <button id="btn-hinge" class="ex-btn w-full py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm font-semibold transition-colors">Hinge</button>
+        <!-- Exercise Type Selector (Horizontal layout) -->
+        <div class="glass-panel p-2.5 rounded-xl shadow-lg pointer-events-auto">
+            <div class="text-[9px] font-bold text-gray-400 mb-1.5 tracking-wider uppercase text-center">Exercise</div>
+            <div class="flex gap-1 justify-between">
+                <button id="btn-squat" class="ex-btn flex-1 py-1.5 bg-blue-600 text-white rounded text-[9px] font-bold transition-colors">Squat</button>
+                <button id="btn-bulgarian" class="ex-btn flex-1 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-[9px] font-bold transition-colors">Split</button>
+                <button id="btn-hinge" class="ex-btn flex-1 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-[9px] font-bold transition-colors">Hinge</button>
             </div>
         </div>
 
         <!-- Target Hold Time Settings -->
-        <div class="glass-panel p-4 rounded-2xl shadow-lg">
-            <div class="flex justify-between items-center mb-2">
-                <h3 class="text-xs font-bold text-gray-400 tracking-wider uppercase">Target Hold</h3>
-                <span id="hold-display" class="text-blue-400 font-bold text-sm">2.0s</span>
+        <div class="glass-panel p-2.5 rounded-xl shadow-lg pointer-events-auto">
+            <div class="flex justify-between items-center mb-1.5">
+                <div class="text-[9px] font-bold text-gray-400 tracking-wider uppercase">Hold Target</div>
+                <span id="hold-display" class="text-blue-400 font-bold text-[10px]">2.0s</span>
             </div>
             <input type="range" id="hold-slider" min="0" max="5" step="0.5" value="2">
         </div>
-    </div>
 
-    <!-- Right Side: Real-time Data HUD -->
-    <div class="absolute top-4 right-4 z-10 flex flex-col gap-3 w-32 sm:w-40 pointer-events-none">
-        
         <!-- Current State -->
-        <div class="glass-panel p-3 sm:p-4 rounded-2xl shadow-lg">
-            <div class="text-[10px] sm:text-xs text-gray-400 font-bold tracking-wider mb-1">STATE</div>
-            <div id="current-state" class="text-lg sm:text-xl font-black text-blue-400 tracking-tight">STANDING</div>
+        <div class="glass-panel p-2.5 rounded-xl shadow-lg pointer-events-auto">
+            <div class="text-[9px] text-gray-400 font-bold tracking-wider mb-0.5 uppercase">Status</div>
+            <div id="current-state" class="text-sm sm:text-base font-black text-blue-400 tracking-tight leading-tight">STANDING</div>
         </div>
 
         <!-- Joint Angle -->
-        <div class="glass-panel p-3 sm:p-4 rounded-2xl shadow-lg">
-            <div id="angle-label" class="text-[10px] sm:text-xs text-gray-400 font-bold tracking-wider mb-1 uppercase">KNEE ANGLE</div>
+        <div class="glass-panel p-2.5 rounded-xl shadow-lg pointer-events-auto">
+            <div id="angle-label" class="text-[9px] text-gray-400 font-bold tracking-wider mb-0.5 uppercase">Knee Angle</div>
             <div class="flex items-baseline gap-1">
-                <div id="angle-value" class="text-3xl sm:text-4xl font-black metric-value">--</div>
-                <div class="text-sm text-gray-400">°</div>
+                <div id="angle-value" class="text-xl sm:text-2xl font-black metric-value">--</div>
+                <div class="text-[10px] text-gray-400">°</div>
             </div>
-            <div class="w-full bg-gray-700 h-1.5 rounded-full mt-2 overflow-hidden">
+            <div class="w-full bg-gray-700 h-1 rounded-full mt-1.5 overflow-hidden">
                 <div id="angle-bar" class="bg-blue-500 h-full w-full transition-all duration-100"></div>
             </div>
-            <div class="flex justify-between text-[8px] sm:text-[10px] text-gray-500 mt-1 font-medium">
-                <span id="angle-min">90° (Down)</span>
-                <span id="angle-max">160° (Up)</span>
+            <div class="flex justify-between text-[7px] text-gray-500 mt-1 font-medium">
+                <span id="angle-min">90°</span>
+                <span id="angle-max">160°</span>
             </div>
         </div>
 
         <!-- Torso Angle -->
-        <div class="glass-panel p-3 sm:p-4 rounded-2xl shadow-lg">
-            <div class="text-[10px] sm:text-xs text-gray-400 font-bold tracking-wider mb-1 uppercase">TORSO ANGLE</div>
+        <div class="glass-panel p-2.5 rounded-xl shadow-lg pointer-events-auto">
+            <div class="text-[9px] text-gray-400 font-bold tracking-wider mb-0.5 uppercase">Torso Angle</div>
             <div class="flex items-baseline gap-1">
-                <div id="torso-value" class="text-2xl sm:text-3xl font-black metric-value">--</div>
-                <div class="text-sm text-gray-400">°</div>
+                <div id="torso-value" class="text-xl sm:text-2xl font-black metric-value">--</div>
+                <div class="text-[10px] text-gray-400">°</div>
             </div>
-            <div class="flex justify-between text-[8px] sm:text-[10px] text-gray-500 mt-1 font-medium">
-                <span>0° (Upright)</span>
-                <span>90° (Parallel)</span>
+            <div class="flex justify-between text-[7px] text-gray-500 mt-1 font-medium">
+                <span>0°</span>
+                <span>90°</span>
             </div>
         </div>
 
         <!-- Hold Time -->
-        <div class="glass-panel p-3 sm:p-4 rounded-2xl shadow-lg">
-            <div class="text-[10px] sm:text-xs text-gray-400 font-bold tracking-wider mb-1">HOLD TIME</div>
+        <div class="glass-panel p-2.5 rounded-xl shadow-lg pointer-events-auto">
+            <div class="text-[9px] text-gray-400 font-bold tracking-wider mb-0.5 uppercase">Hold Time</div>
             <div class="flex items-baseline gap-1">
-                <div id="hold-value" class="text-2xl sm:text-3xl font-black metric-value text-white transition-colors duration-200">0.0</div>
-                <div class="text-xs text-gray-400">sec</div>
+                <div id="hold-value" class="text-xl sm:text-2xl font-black metric-value text-white transition-colors duration-200">0.0</div>
+                <div class="text-[10px] text-gray-400">sec</div>
             </div>
         </div>
 
         <!-- Rep Counter -->
-        <div class="glass-panel p-3 sm:p-4 rounded-2xl shadow-lg border-t-2 border-t-emerald-500">
-            <div id="rep-title" class="text-[10px] sm:text-xs text-emerald-400 font-bold tracking-wider mb-1 uppercase">SQUAT REPS</div>
-            <div id="rep-value" class="text-4xl sm:text-5xl font-black metric-value text-white">0</div>
+        <div class="glass-panel p-2.5 rounded-xl shadow-lg border-t border-t-emerald-500 pointer-events-auto">
+            <div id="rep-title" class="text-[9px] text-emerald-400 font-bold tracking-wider mb-0.5 uppercase">Squat Reps</div>
+            <div id="rep-value" class="text-3xl sm:text-4xl font-black metric-value text-white leading-none">0</div>
         </div>
     </div>
 
@@ -257,22 +262,22 @@
             exBtns[type].classList.add('bg-blue-600', 'text-white');
             exBtns[type].classList.remove('bg-gray-700', 'text-gray-300');
 
-            // Update Logic Thresholds & UI Labels
+            // Update Logic Thresholds & UI Labels (Shortened strings for tight layout)
             if (type === "SQUAT") {
                 ANGLE_DOWN = 90;
                 angleLabelEl.innerText = "KNEE ANGLE";
                 repTitleEl.innerText = "SQUAT REPS";
-                document.getElementById('angle-min').innerText = "90° (Down)";
+                document.getElementById('angle-min').innerText = "90°";
             } else if (type === "BULGARIAN") {
-                ANGLE_DOWN = 100; // Slightly higher tolerance for split squats
+                ANGLE_DOWN = 100;
                 angleLabelEl.innerText = "KNEE ANGLE";
-                repTitleEl.innerText = "BULGARIAN REPS";
-                document.getElementById('angle-min').innerText = "100° (Down)";
+                repTitleEl.innerText = "SPLIT REPS";
+                document.getElementById('angle-min').innerText = "100°";
             } else if (type === "HINGE") {
                 ANGLE_DOWN = 100; // Tracking Hip Angle instead of Knee
                 angleLabelEl.innerText = "HIP ANGLE";
                 repTitleEl.innerText = "HINGE REPS";
-                document.getElementById('angle-min').innerText = "100° (Down)";
+                document.getElementById('angle-min').innerText = "100°";
             }
         }
 
