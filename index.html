@@ -29,10 +29,11 @@
         }
 
         canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-            object-fit: cover; /* Make canvas act as a fullscreen background */
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* Make canvas act as a fullscreen background */
+    transform: scaleX(-1); /* Flips the camera horizontally to act like a natural mirror */
         }
         
         /* Hide the video element robustly for all mobile browsers */
